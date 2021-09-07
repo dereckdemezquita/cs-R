@@ -407,6 +407,22 @@ invisible(future.apply::future_mapply(function(column, column_name) {
 }, generated_data[,-c(1, 2)], names(generated_data[,-c(1, 2)]), SIMPLIFY = FALSE))
 ```
 
+```r
+messageParallel <- function(...) {
+    system(sprintf('echo "%s"', paste0(..., collapse = "")))
+}
+
+future::plan(strategy = "multisession", workers = future::availableCores())
+invisible(future.apply::future_mapply(function(column, column_name) {
+    messageParallel(stringr::str_interp('We are on this column: ${column_name}'))
+    t.test(
+        column[generated_data$condition == "control"],
+        column[generated_data$condition == "test"],
+        var.equal = TRUE
+    )$p.value
+}, generated_data[,-c(1, 2)], names(generated_data[,-c(1, 2)]), SIMPLIFY = FALSE))
+```
+
 ```
 ## We are on this column: gene_1
 ```
@@ -425,23 +441,6 @@ invisible(future.apply::future_mapply(function(column, column_name) {
 
 ```
 ## We are on this column: gene_5
-```
-
-
-```r
-messageParallel <- function(...) {
-    system(sprintf('echo "%s"', paste0(..., collapse = "")))
-}
-
-future::plan(strategy = "multisession", workers = future::availableCores())
-invisible(future.apply::future_mapply(function(column, column_name) {
-    messageParallel(stringr::str_interp('We are on this column: ${column_name}'))
-    t.test(
-        column[generated_data$condition == "control"],
-        column[generated_data$condition == "test"],
-        var.equal = TRUE
-    )$p.value
-}, generated_data[,-c(1, 2)], names(generated_data[,-c(1, 2)]), SIMPLIFY = FALSE))
 ```
 
 # Memory and efficient coding
