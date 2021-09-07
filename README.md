@@ -2,6 +2,34 @@
 
 Advanced features of R, things I've learned, notes, templates, and benchmarks. In this course I include things I learned during package development.
 
+## Bullet points
+
+1. Better string interpolation
+1. Better loops: conclusion `lapply` is better, if you have big data use `future.apply::future_lapply()`
+    1. Consider the shape of your data, if you have a lot of columns calculations will take a long time, parallelisation might be useful.
+    1. If you must use a `for` loop, initialise its vector output: `results <- vector(mode = "list", length = how_many_elements_do_you_expect)`
+    1. Use this function for printing in parallel code: `messageParallel <- function(...) {system(sprintf('echo "%s"', paste0(..., collapse = "")))}`
+1. Use `data.table`:
+    1. `data.table` is an extension of `data.frame` they are compatible.
+    1. Reshape your data (longer/wider) with `data.table`'s `melt()` and `dcast()` - a lot faster.
+    1. Read/write `csv` files with `data.table::fread()`/`data.table::fwrite()`.
+1. Matrices take up less space.
+1. Use this function to merge across a list by matching rownames:
+
+```r
+cbindMatchList <- function(df_list) {
+    return(do.call("cbind", lapply(unname(df_list), function(index) {
+        if(Reduce(function(...) {
+            identical(...)
+        }, lapply(df_list, "rownames"))) {
+            return(index[match(rownames(df_list[[1]]), rownames(index)),])
+        } else {
+            stop('Your rownames could not be matched across the whole list.')
+        }
+    })))
+}
+```
+
 ## Useful syntax
 
 Here is some code and syntax I found myself using and re-using.
