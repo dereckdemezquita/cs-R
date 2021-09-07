@@ -1,24 +1,4 @@
----
-title: ""
-author: "Dereck de Mézquita"
-date: "07 September, 2021"
-knit: (function(inputFile, encoding) { 
-      rmarkdown::render(inputFile,
-                        encoding=encoding, 
-                        output_file=file.path(dirname(inputFile), "./build/", "/cs-bash.html")) })
-output:
-  html_document:
-    css: "styles.css"
-    fig_caption: yes
-    keep_md: yes
-    number_sections: yes
-    toc: yes
-    # code_folding: hide
-editor_options: 
-  chunk_output_type: console
----
-
-# cs-R
+# cs-R <img src="./figures/project-logo.png" width="100" align="right">
 
 Advanced features of R, things I've learned, notes, templates, and benchmarks. In this course I include things I learned during package development.
 
