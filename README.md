@@ -2,9 +2,7 @@
 
 Advanced features of R, things I've learned, notes, templates, and benchmarks. In this course I include things I learned during package development.
 
-## Bullet points
-
-1. Better string interpolation
+1. Better string interpolation: `stringr::str_interp`.
 1. Better loops: conclusion `lapply` is better, if you have big data use `future.apply::future_lapply()`
     1. Consider the shape of your data, if you have a lot of columns calculations will take a long time, parallelisation might be useful.
     1. If you must use a `for` loop, initialise its vector output: `results <- vector(mode = "list", length = how_many_elements_do_you_expect)`
@@ -14,27 +12,13 @@ Advanced features of R, things I've learned, notes, templates, and benchmarks. I
     1. Reshape your data (longer/wider) with `data.table`'s `melt()` and `dcast()` - a lot faster.
     1. Read/write `csv` files with `data.table::fread()`/`data.table::fwrite()`.
 1. Matrices take up less space.
-1. Use this function to merge across a list by matching rownames:
-
-```r
-cbindMatchList <- function(df_list) {
-    return(do.call("cbind", lapply(unname(df_list), function(index) {
-        if(Reduce(function(...) {
-            identical(...)
-        }, lapply(df_list, "rownames"))) {
-            return(index[match(rownames(df_list[[1]]), rownames(index)),])
-        } else {
-            stop('Your rownames could not be matched across the whole list.')
-        }
-    })))
-}
-```
-
-## Useful syntax
+1. S4 class slot type check happens before class initialisation.
 
 Here is some code and syntax I found myself using and re-using.
 
-### Better stringr interpolation
+## Better string interpolation
+
+Typically in `R` people build strings this way using `paste`.
 
 
 ```r
@@ -46,6 +30,8 @@ paste('This is a', how_long, 'string...', sep = " ")
 ## [1] "This is a very long string..."
 ```
 
+A more natural and `JavaScript` way of building strings is using `stringr`:
+
 
 ```r
 how_long <- "very long"
@@ -55,6 +41,8 @@ stringr::str_interp('This is a ${how_long} string...')
 ```
 ## [1] "This is a very long string..."
 ```
+
+This allows for more natural syntax in the following way:
 
 
 ```r
@@ -70,11 +58,14 @@ for (i in seq_along(iris[,-ncol(iris)])) {
 ## [1] "The mean for the column Petal.Width is: 1.19933"
 ```
 
-### Better loops
+## Better loops; `for` vs `apply`
+
+If you come from other programming languages you might instinctively use a `for` loop in this way.
 
 
 ```r
 separate_species <- vector(mode = "list", length = length(unique(iris$Species)))
+
 for (i in seq_along(unique(iris$Species))) {
     separate_species[[i]] <- iris[as.character(iris$Species) == as.character(unique(iris$Species)[i]), -ncol(iris)]
     
@@ -88,6 +79,8 @@ for (i in seq_along(unique(iris$Species))) {
 ## [1] 7
 ## [1] 7.9
 ```
+
+This has the side effect of polluting our global environment with variables.
 
 
 ```r
@@ -105,6 +98,11 @@ i
 ```
 ## [1] 3
 ```
+
+In we can use something much better, `apply` type loops in conjunction with `list`s. This allows us to manipulate our data inside anonymous functions, and use `lapply`. The apply family of functions have a couple of advantages:
+
+1. These are optimised in `R` and run on `C` code a lot faster than `for` loops.
+1. These are embarrassingly parallel problems; these can easily be swapped out for `future` versions and run in parallel - `future.apply` package.
 
 
 
@@ -125,13 +123,11 @@ apply_sep <- lapply(species_names, function(species_names) {
 ## [1] 7.9
 ```
 
-#### Proof it's better
+### Benchmark: `for` vs `lapply`
 
 Let's benchmark these two methods. Applies also work over `data.frames`, use all applies for going over columns, and `apply` with a margin of `1` for going over rows.
 
 Let's start by simulating some data.
-
-##### ncol 10k nrow 40
 
 
 ```r
@@ -161,6 +157,8 @@ generated_data <- (function(offset_min, offset_max, num_cols, num_samples) {
 data.table::fwrite(generated_data, "./data/generated-data.csv")
 ```
 
+We will generalise the above into a function:
+
 
 ```r
 generateData <- function(offset_min, offset_max, num_cols, num_samples) {
@@ -186,7 +184,7 @@ generateData <- function(offset_min, offset_max, num_cols, num_samples) {
 }
 ```
 
-Let's do a simple t-test a relatively simple operation.
+Let's do a simple t-test a relatively simple operation; here's a preview of our data:
 
 
 ```r
@@ -195,12 +193,12 @@ head(generated_data[, 1:5])
 
 ```
 ##       subject condition   gene_1   gene_2   gene_3
-## 1   subject_a   control 11.23699 14.57881 12.40960
-## 2 subject_a.1   control 12.88533 14.22547 13.30686
-## 3 subject_a.2   control 13.18088 14.38179 12.81883
-## 4 subject_a.3   control 14.96860 13.70888 14.60143
-## 5 subject_a.4   control 11.91170 13.59393 13.22436
-## 6 subject_a.5   control 10.91992 10.82250 12.63721
+## 1   subject_a   control 13.59077 14.76026 11.60643
+## 2 subject_a.1   control 12.98023 12.75922 11.05997
+## 3 subject_a.2   control 12.48429 11.62539 13.36036
+## 4 subject_a.3   control 10.34328 13.32511 10.81589
+## 5 subject_a.4   control 11.94569 13.62541 13.40303
+## 6 subject_a.5   control 11.58461 12.90442 10.59633
 ```
 
 ```r
@@ -209,12 +207,12 @@ tail(generated_data[, 1:5])
 
 ```
 ##         subject condition   gene_1   gene_2   gene_3
-## 75 subject_b.34      test 135.6714 160.8790 129.2394
-## 76 subject_b.35      test 146.0346 134.3072 130.5009
-## 77 subject_b.36      test 157.9893 113.9051 127.4367
-## 78 subject_b.37      test 112.1295 160.5303 110.0388
-## 79 subject_b.38      test 132.9362 164.2841 163.7570
-## 80 subject_b.39      test 155.4719 149.8519 116.3314
+## 75 subject_b.34      test 152.5395 132.5556 157.4977
+## 76 subject_b.35      test 128.8987 148.8747 131.3119
+## 77 subject_b.36      test 128.8214 121.0501 152.2529
+## 78 subject_b.37      test 132.7050 121.8610 156.1513
+## 79 subject_b.38      test 151.6955 125.5584 148.8270
+## 80 subject_b.39      test 112.0891 155.2052 149.5747
 ```
 
 ```r
@@ -225,6 +223,15 @@ dim(generated_data)
 ## [1]    80 10002
 ```
 
+Let's start benchmarking with a dataset of size: columns 10 k, rows 40.
+
+Now let's do our calculations over these data; we will use 4 different methods to loop the data.
+
+1. Uninitialised for loop; this is a loop which grows a result vector. What happens here is that memory is allocated for every n size vector created at each iteration - **not efficient**.
+1. Initialised for loop; here we predict how big our results vector will be and create it at that size from the begining.
+1. Apply `lapply` loop. No need to create a vector this is done for us from the input data.
+1. Future `future_lapply` the same as above but this code is run in parallel. As you might notice this might not be a lot faster than `lapply`; future parallel code will beat sequential code when the datasets become very large; the job is split up across each core of your processor.
+
 
 ```r
 for_vs_lapply <- microbenchmark::microbenchmark(
@@ -270,63 +277,22 @@ for_vs_lapply <- microbenchmark::microbenchmark(
     }),
     times = 3
 )
+```
 
+```r
 ggplot2::autoplot(for_vs_lapply)
 ```
 
-```
-## Coordinate system already present. Adding new coordinate system, which will replace the existing one.
-```
+<div align="center"><img src="/figures/cs-bash_files/figure-html/microbench-plot-for-vs-lapply-10k-40-1.png" style="display: block; margin: auto;" /></div>
 
-![](build-Rmd/build/cs-bash_files/figure-html/unnamed-chunk-10-1.png)<!-- -->
-
-Consider the shape of your data, how many subjects how many observations? 
-
-##### ncol 10k nrow 1.5k
+Consider the shape of your data, how many subjects how many observations? Now let's up the data size to 10k columns and 1.5k rows.
 
 
 ```r
 generated_data <- generateData(100, 150, num_cols = 7500, num_samples = 1500)
 ```
 
-Let's do a simple t-test a relatively simple operation.
-
-
-```r
-head(generated_data[, 1:5])
-```
-
-```
-##       subject condition   gene_1   gene_2   gene_3
-## 1   subject_a   control 13.24246 10.99030 13.54377
-## 2 subject_a.1   control 11.95518 11.37059 14.58049
-## 3 subject_a.2   control 13.70782 11.32466 12.41658
-## 4 subject_a.3   control 13.65184 14.99207 13.88512
-## 5 subject_a.4   control 13.97455 14.12639 11.76510
-## 6 subject_a.5   control 14.86573 14.94663 14.24125
-```
-
-```r
-tail(generated_data[, 1:5])
-```
-
-```
-##             subject condition   gene_1   gene_2   gene_3
-## 2995 subject_b.1494      test 143.3271 116.8602 116.4717
-## 2996 subject_b.1495      test 138.6813 121.2900 146.3535
-## 2997 subject_b.1496      test 135.4057 117.7143 161.8835
-## 2998 subject_b.1497      test 131.0370 159.5987 149.9702
-## 2999 subject_b.1498      test 142.6950 116.6863 154.3085
-## 3000 subject_b.1499      test 126.1240 115.3776 146.1258
-```
-
-```r
-dim(generated_data)
-```
-
-```
-## [1] 3000 7502
-```
+Again the same calculations as above a t-test.
 
 
 ```r
@@ -373,22 +339,33 @@ for_vs_lapply <- microbenchmark::microbenchmark(
     }),
     times = 3
 )
+```
 
+
+
+```r
 ggplot2::autoplot(for_vs_lapply)
 ```
 
-```
-## Coordinate system already present. Adding new coordinate system, which will replace the existing one.
-```
-
-![](build-Rmd/build/cs-bash_files/figure-html/unnamed-chunk-13-1.png)<!-- -->
+<div align="center"><img src="/figures/cs-bash_files/figure-html/microbench-plot-for-vs-lapply-10k-1500-1.png" style="display: block; margin: auto;" /></div>
 
 ### Messaging and printing in future applies
+
+Messaging back to the console is a challenge when using parallel code; use these functions to print to the console from parallel code:
+
+
+```r
+messageParallel <- function(...) {
+    system(sprintf('echo "%s"', paste0(..., collapse = "")))
+}
+```
 
 
 ```r
 generated_data <- generateData(100, 150, num_cols = 5, num_samples = 10)
 ```
+
+Here we message back from a normal `apply` type function.
 
 
 ```r
@@ -422,9 +399,12 @@ invisible(mapply(function(column, column_name) {
 ## We are on this column: gene_5
 ```
 
+As you can see using the `message` function from paralle code doesn't work.
+
 
 ```r
 future::plan(strategy = "multisession", workers = future::availableCores())
+
 invisible(future.apply::future_mapply(function(column, column_name) {
     message(stringr::str_interp('We are on this column: ${column_name}'))
     t.test(
@@ -435,12 +415,12 @@ invisible(future.apply::future_mapply(function(column, column_name) {
 }, generated_data[,-c(1, 2)], names(generated_data[,-c(1, 2)]), SIMPLIFY = FALSE))
 ```
 
-```r
-messageParallel <- function(...) {
-    system(sprintf('echo "%s"', paste0(..., collapse = "")))
-}
+Here we use the `messageParallel` function we defined above:
 
+
+```r
 future::plan(strategy = "multisession", workers = future::availableCores())
+
 invisible(future.apply::future_mapply(function(column, column_name) {
     messageParallel(stringr::str_interp('We are on this column: ${column_name}'))
     t.test(
@@ -471,11 +451,14 @@ invisible(future.apply::future_mapply(function(column, column_name) {
 ## We are on this column: gene_5
 ```
 
-# Memory and efficient coding
+# Memory and resource efficient programming
 
-## `data.table`
+## Pivot and reshaping data
 
-Melting data, pivot from wide to long dataset.
+We should heavily use `data.table`. It has been heavily optimised and written mostly in multi-threaded `C` and `C++`. For instructions on installing a multi-threaded version of `data.table` you can check out my guide here: [Makevars](https://gist.github.com/dereckdemezquita/ed860601138a46cf591a1bdcc95db0a2).
+
+Here I demonstrate melting data; pivot from wide to long dataset and benchmark the different methods.
+
 
 ```r
 df_data <- as.data.frame(tidyr::relig_income)
@@ -483,84 +466,22 @@ tib_data <- tidyr::as_tibble(tidyr::relig_income)
 DT_data <- data.table::as.data.table(tidyr::relig_income) # converts data which is a data.frame to data.table *by reference*
 ```
 
+We will be using the following methods for benchmark:
+
+1. `data.table::melt`
+1. `tidyr::pivot_longer`
+1. `reshape2::melt`
+1. `reshape::melt`
+
 
 ```r
 data.table::melt(DT_data, id.vars = "religion")
-```
-
-```
-##                   religion           variable value
-##   1:              Agnostic              <$10k    27
-##   2:               Atheist              <$10k    12
-##   3:              Buddhist              <$10k    27
-##   4:              Catholic              <$10k   418
-##   5:    Don’t know/refused              <$10k    15
-##  ---                                               
-## 176:              Orthodox Don't know/refused    73
-## 177:       Other Christian Don't know/refused    18
-## 178:          Other Faiths Don't know/refused    71
-## 179: Other World Religions Don't know/refused     8
-## 180:          Unaffiliated Don't know/refused   597
-```
-
-```r
 tidyr::pivot_longer(tib_data, -religion)
-```
-
-```
-## # A tibble: 180 x 3
-##    religion name               value
-##    <chr>    <chr>              <dbl>
-##  1 Agnostic <$10k                 27
-##  2 Agnostic $10-20k               34
-##  3 Agnostic $20-30k               60
-##  4 Agnostic $30-40k               81
-##  5 Agnostic $40-50k               76
-##  6 Agnostic $50-75k              137
-##  7 Agnostic $75-100k             122
-##  8 Agnostic $100-150k            109
-##  9 Agnostic >150k                 84
-## 10 Agnostic Don't know/refused    96
-## # … with 170 more rows
-```
-
-```r
 reshape2::melt(df_data, id.vars = "religion")
-```
-
-```
-##                    religion           variable value
-## 1                  Agnostic              <$10k    27
-## 2                   Atheist              <$10k    12
-## 3                  Buddhist              <$10k    27
-## 4                  Catholic              <$10k   418
-## 5        Don’t know/refused              <$10k    15
-## 6          Evangelical Prot              <$10k   575
-## 7                     Hindu              <$10k     1
-## 8   Historically Black Prot              <$10k   228
-## 9         Jehovah's Witness              <$10k    20
-## 10                   Jewish              <$10k    19
-## [ reached 'max' / getOption("max.print") -- omitted n rows ]
-```
-
-```r
 reshape::melt(df_data, id.vars = "religion")
 ```
 
-```
-##                    religion           variable value
-## 1                  Agnostic              <$10k    27
-## 2                   Atheist              <$10k    12
-## 3                  Buddhist              <$10k    27
-## 4                  Catholic              <$10k   418
-## 5        Don’t know/refused              <$10k    15
-## 6          Evangelical Prot              <$10k   575
-## 7                     Hindu              <$10k     1
-## 8   Historically Black Prot              <$10k   228
-## 9         Jehovah's Witness              <$10k    20
-## 10                   Jewish              <$10k    19
-## [ reached 'max' / getOption("max.print") -- omitted n rows ]
-```
+We will also try these in combination with different data types. Some of these methods cast the data to other types or pass them to other methods; specifically `data.table` passes to `reshape2` if it receives a `data.frame` instead of a `data.table`.
 
 
 ```r
@@ -575,20 +496,17 @@ bench_pivoting <- microbenchmark::microbenchmark(
 )
 ```
 
+
 ```r
 ggplot2::autoplot(bench_pivoting) +
     ggplot2::labs(title = "Comparing pivot long format data 1000 iterations", subtitle = "data.table is memory efficient - variables by reference not copies")
 ```
 
-```
-## Coordinate system already present. Adding new coordinate system, which will replace the existing one.
-```
+<div align="center"><img src="/figures/cs-bash_files/figure-html/microbench-plot-pivot-longer-methods-1.png" style="display: block; margin: auto;" /></div>
 
-![](build-Rmd/build/cs-bash_files/figure-html/unnamed-chunk-20-1.png)<!-- -->
+## Reading data and writing data
 
-## Reading in data
-
-A lot of different options: `read.csv`, `read_csv`, `vroom`, `fread`. 
+We previously saved some data; let's try and read it back in. A lot of different options: `read.csv`, `read_csv`, `vroom`, `fread`.
 
 
 ```r
@@ -601,17 +519,14 @@ reading_csv <- microbenchmark::microbenchmark(
 )
 ```
 
+
 ```r
 ggplot2::autoplot(reading_csv)
 ```
 
-```
-## Coordinate system already present. Adding new coordinate system, which will replace the existing one.
-```
+<div align="center"><img src="/figures/cs-bash_files/figure-html/microbench-plot-read-data-1.png" style="display: block; margin: auto;" /></div>
 
-![](build-Rmd/build/cs-bash_files/figure-html/unnamed-chunk-21-1.png)<!-- -->
-
-## Writing data
+Now let's write some data. As before `data.table` comes out on top again.
 
 
 ```r
@@ -622,21 +537,22 @@ writing_csv <- microbenchmark::microbenchmark(
     datatable_fwrite = ({data.table::fwrite(read_in_data, "./data/write-test-generated-data.csv")}),
     times = 3
 )
+```
 
+
+```r
 ggplot2::autoplot(writing_csv)
 ```
 
-```
-## Coordinate system already present. Adding new coordinate system, which will replace the existing one.
-```
-
-![](build-Rmd/build/cs-bash_files/figure-html/unnamed-chunk-22-1.png)<!-- -->
+<div align="center"><img src="/figures/cs-bash_files/figure-html/microbench-plot-write-data-1.png" style="display: block; margin: auto;" /></div>
 
 ## Data structures and manipulation
 
 ### Object sizing
 
 Matrices are better than data.frames. Consider the shape of your data, do you have a large number of columns?
+
+Here in this example we have 200000 rows and 2 columns.
 
 
 ```r
@@ -666,6 +582,7 @@ dim(m)
 ## [1] 200000      2
 ```
 
+In this next example we have 200000 columns, and 2 rows.
 
 
 ```r
@@ -694,182 +611,112 @@ dim(m)
 ## [1]      2 200000
 ```
 
-### Matching rows across list to merge
+In conclusion the more columns we have the larger the object is. This can be mitigated by using a `matrix` rather than `data.frame`.
+
+# S4 and object oriented programming (OOP)
+
+## Class validity check or initialisation first?
+
+I had a question whether class initialisation happens before or after validity check. Specifically I wanted to know if I can pass a `list` type object and convert to a `data.table` in the `initialize` method.
+
+Let's start with a data set; this is a `list` of `data.table`s.
 
 
 ```r
-list_gen_data <- list(
-    generated_data1 = generateData(1, 2, num_cols = 3, num_samples = 7),
-    generated_data2 = generateData(1, 3, num_cols = 3, num_samples = 7)
+DT <- data.table::data.table(iris)
+
+DT[, row_name := 1:nrow(DT)]
+
+ls <- list(DT[, c("row_name", "Sepal.Length", "Sepal.Width")], DT[, c("row_name", "Petal.Length", "Petal.Width")])
+
+# merge(ls[[1]], ls[[2]], by = "row_name")
+```
+
+Let's create the class.
+
+
+```r
+InitListDT <- setClass(
+    Class = "InitListDT",
+    slots = list(
+        list_to_dt = "data.table"
+    ),
+    prototype = list(
+        list_to_dt = data.table::data.table()
+    )
 )
 
-list_gen_data <- lapply(list_gen_data, function(data) {
-    rownames(data) <- data$subject
-    return(data[,-c(1, 2)])
+setMethod("initialize", "InitListDT", function(.Object, ...) {
+    .Object <- callNextMethod(.Object, ...)
+
+    .Object@list_to_dt <- Reduce(function(...) {
+        merge(..., by = "row_name")
+    }, .Object@list_to_dt)
+
+    return(.Object)
 })
 
-list_gen_data$generated_data1 <- list_gen_data$generated_data1[order(list_gen_data$generated_data1$gene_1),]
-list_gen_data$generated_data2 <- list_gen_data$generated_data2[order(list_gen_data$generated_data2$gene_2),]
+InitListDT(list_to_dt = ls)
 ```
 
-Re-order and merge?
+```
+## Error in validObject(.Object): invalid class "InitListDT" object: invalid object for slot "list_to_dt" in class "InitListDT": got class "list", should be or extend class "data.table"
+```
+
+In my example shown above you can see this is not possible. The class slots are set and checked before they are passed over to the initialisation method. We can solve this by allow for a `list` **or** `data.table` type in this slot.
 
 
 ```r
-list_gen_data <- lapply(list_gen_data, function(list_item) {
-    list_item[order(rownames(list_item)),]
+setClassUnion(
+    "list_OR_data.table",
+    members = c("list", "data.table")
+)
+```
+
+```
+## Warning: class "data.table" is defined (with package slot 'data.table') but no
+## metadata object found to revise superClass information---not imported? Making a
+## copy in package '.GlobalEnv'
+```
+
+```r
+InitListDT <- setClass(
+    Class = "InitListDT",
+    slots = list(
+        list_to_dt = "list_OR_data.table"
+    ),
+    prototype = list(
+        list_to_dt = data.table::data.table()
+    )
+)
+
+setMethod("initialize", "InitListDT", function(.Object, ...) {
+    .Object <- callNextMethod(.Object, ...)
+
+    .Object@list_to_dt <- Reduce(function(...) {
+        merge(..., by = "row_name")
+    }, .Object@list_to_dt)
+
+    return(.Object)
 })
 
-do.call("cbind", unname(list_gen_data))
+object <- InitListDT(list_to_dt = ls)
+
+head(object@list_to_dt)
 ```
 
 ```
-##               gene_1   gene_2   gene_3   gene_1   gene_2   gene_3
-## subject_a   12.68507 14.24490 10.75648 11.21206 13.25907 14.45536
-## subject_a.1 12.92148 10.77268 10.40092 13.65148 14.04845 11.38639
-## subject_a.2 14.00676 12.05971 12.37896 12.07238 14.75446 10.36797
-## subject_a.3 12.14339 10.41500 11.53333 12.19432 10.58976 13.31153
-## subject_a.4 14.11516 10.93391 11.33685 11.03708 10.28223 11.92647
-## subject_a.5 10.58244 14.41713 13.10027 12.33496 10.62897 11.93101
-## subject_a.6 14.70494 13.33307 10.00807 10.70271 11.52116 12.53080
-## subject_b   14.25293 13.63079 15.84343 15.56593 13.72047 15.17469
-## subject_b.1 14.91686 13.79518 11.36008 14.53767 12.68796 11.15143
-## subject_b.2 11.33795 15.80622 15.90950 14.40384 13.14216 17.24636
-## subject_b.3 13.63937 14.96368 12.36944 13.16554 12.17066 12.91020
-## subject_b.4 16.93455 16.21821 15.93083 14.53568 11.32054 11.69458
-## subject_b.5 14.85176 13.00448 13.42196 15.08215 12.31193 12.05369
-## subject_b.6 11.16582 14.53229 12.06831 14.13001 15.07943 16.37960
+##    row_name Sepal.Length Sepal.Width Petal.Length Petal.Width
+## 1:        1          5.1         3.5          1.4         0.2
+## 2:        2          4.9         3.0          1.4         0.2
+## 3:        3          4.7         3.2          1.3         0.2
+## 4:        4          4.6         3.1          1.5         0.2
+## 5:        5          5.0         3.6          1.4         0.2
+## 6:        6          5.4         3.9          1.7         0.4
 ```
 
 
-```r
-cbindMatchList <- function(df_list) {
-    return(do.call("cbind", lapply(unname(df_list), function(index) {
-        if(Reduce(function(...) {
-            identical(...)
-        }, lapply(df_list, "rownames"))) {
-            return(index[match(rownames(df_list[[1]]), rownames(index)),])
-        } else {
-            stop('Your rownames could not be matched across the whole list.')
-        }
-    })))
-}
-```
-
-
-```r
-cbindMatchList(list_gen_data)
-```
-
-```
-##               gene_1   gene_2   gene_3   gene_1   gene_2   gene_3
-## subject_a   12.68507 14.24490 10.75648 11.21206 13.25907 14.45536
-## subject_a.1 12.92148 10.77268 10.40092 13.65148 14.04845 11.38639
-## subject_a.2 14.00676 12.05971 12.37896 12.07238 14.75446 10.36797
-## subject_a.3 12.14339 10.41500 11.53333 12.19432 10.58976 13.31153
-## subject_a.4 14.11516 10.93391 11.33685 11.03708 10.28223 11.92647
-## subject_a.5 10.58244 14.41713 13.10027 12.33496 10.62897 11.93101
-## subject_a.6 14.70494 13.33307 10.00807 10.70271 11.52116 12.53080
-## subject_b   14.25293 13.63079 15.84343 15.56593 13.72047 15.17469
-## subject_b.1 14.91686 13.79518 11.36008 14.53767 12.68796 11.15143
-## subject_b.2 11.33795 15.80622 15.90950 14.40384 13.14216 17.24636
-## subject_b.3 13.63937 14.96368 12.36944 13.16554 12.17066 12.91020
-## subject_b.4 16.93455 16.21821 15.93083 14.53568 11.32054 11.69458
-## subject_b.5 14.85176 13.00448 13.42196 15.08215 12.31193 12.05369
-## subject_b.6 11.16582 14.53229 12.06831 14.13001 15.07943 16.37960
-```
-
-All this chunk is doing is returning your list of `data.frames` but with `rownames` in matching order. If there is a mismatch somewhere, an error is thrown.
-
-
-```r
-lapply(unname(list_gen_data), function(index) {
-    if (Reduce(function(...) {
-        identical(...)
-    }, lapply(list_gen_data, "rownames"))) {
-        return(index[match(rownames(list_gen_data[[1]]), rownames(index)), ])
-    } else {
-        stop('Your rownames could not be matched across the whole list.')
-    }
-})
-```
-
-```
-## [[1]]
-##               gene_1   gene_2   gene_3
-## subject_a   12.68507 14.24490 10.75648
-## subject_a.1 12.92148 10.77268 10.40092
-## subject_a.2 14.00676 12.05971 12.37896
-## subject_a.3 12.14339 10.41500 11.53333
-## subject_a.4 14.11516 10.93391 11.33685
-## subject_a.5 10.58244 14.41713 13.10027
-## subject_a.6 14.70494 13.33307 10.00807
-## subject_b   14.25293 13.63079 15.84343
-## subject_b.1 14.91686 13.79518 11.36008
-## subject_b.2 11.33795 15.80622 15.90950
-## subject_b.3 13.63937 14.96368 12.36944
-## subject_b.4 16.93455 16.21821 15.93083
-## subject_b.5 14.85176 13.00448 13.42196
-## subject_b.6 11.16582 14.53229 12.06831
-## 
-## [[2]]
-##               gene_1   gene_2   gene_3
-## subject_a   11.21206 13.25907 14.45536
-## subject_a.1 13.65148 14.04845 11.38639
-## subject_a.2 12.07238 14.75446 10.36797
-## subject_a.3 12.19432 10.58976 13.31153
-## subject_a.4 11.03708 10.28223 11.92647
-## subject_a.5 12.33496 10.62897 11.93101
-## subject_a.6 10.70271 11.52116 12.53080
-## subject_b   15.56593 13.72047 15.17469
-## subject_b.1 14.53767 12.68796 11.15143
-## subject_b.2 14.40384 13.14216 17.24636
-## subject_b.3 13.16554 12.17066 12.91020
-## subject_b.4 14.53568 11.32054 11.69458
-## subject_b.5 15.08215 12.31193 12.05369
-## subject_b.6 14.13001 15.07943 16.37960
-```
-
-This is where the matching `rownames` are checked.
-
-
-```r
-list_rownames <- lapply(list_gen_data, "rownames")
-list_rownames
-```
-
-```
-## $generated_data1
-##  [1] "subject_a"   "subject_a.1" "subject_a.2" "subject_a.3" "subject_a.4"
-##  [6] "subject_a.5" "subject_a.6" "subject_b"   "subject_b.1" "subject_b.2"
-## [11] "subject_b.3" "subject_b.4" "subject_b.5" "subject_b.6"
-## 
-## $generated_data2
-##  [1] "subject_a"   "subject_a.1" "subject_a.2" "subject_a.3" "subject_a.4"
-##  [6] "subject_a.5" "subject_a.6" "subject_b"   "subject_b.1" "subject_b.2"
-## [11] "subject_b.3" "subject_b.4" "subject_b.5" "subject_b.6"
-```
-
-
-```r
-Reduce(function(...) {
-    identical(...)
-}, list_rownames)
-```
-
-```
-## [1] TRUE
-```
-
-```r
-identical(list_rownames$generated_data1, list_rownames$generated_data2)
-```
-
-```
-## [1] TRUE
-```
-
-# Session info
+## Session info
 
 
 ```r
@@ -877,13 +724,13 @@ sessionInfo()
 ```
 
 ```
-## R version 4.0.5 (2021-03-31)
-## Platform: x86_64-apple-darwin17.0 (64-bit)
-## Running under: macOS Big Sur 10.16
+## R version 4.1.2 (2021-11-01)
+## Platform: aarch64-apple-darwin20.6.0 (64-bit)
+## Running under: macOS Big Sur 11.4
 ## 
 ## Matrix products: default
-## BLAS:   /Library/Frameworks/R.framework/Versions/4.0/Resources/lib/libRblas.dylib
-## LAPACK: /Library/Frameworks/R.framework/Versions/4.0/Resources/lib/libRlapack.dylib
+## BLAS:   /opt/homebrew/Cellar/openblas/0.3.18/lib/libopenblasp-r0.3.18.dylib
+## LAPACK: /opt/homebrew/Cellar/r/4.1.2/lib/R/lib/libRlapack.dylib
 ## 
 ## locale:
 ## [1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
@@ -892,26 +739,26 @@ sessionInfo()
 ## [1] stats     graphics  grDevices utils     datasets  methods   base     
 ## 
 ## loaded via a namespace (and not attached):
-##  [1] tidyselect_1.1.0     xfun_0.22            bslib_0.2.4         
+##  [1] tidyselect_1.1.1     xfun_0.28            bslib_0.3.1         
 ##  [4] purrr_0.3.4          reshape2_1.4.4       listenv_0.8.0       
-##  [7] colorspace_2.0-0     vctrs_0.3.7          generics_0.1.0      
-## [10] htmltools_0.5.1.1    yaml_2.2.1           utf8_1.2.1          
-## [13] rlang_0.4.10         jquerylib_0.1.3      pillar_1.6.0        
-## [16] glue_1.4.2           DBI_1.1.1            bit64_4.0.5         
-## [19] lifecycle_1.0.0      plyr_1.8.6           stringr_1.4.0       
-## [22] munsell_0.5.0        gtable_0.3.0         future_1.21.0       
-## [25] codetools_0.2-18     evaluate_0.14        labeling_0.4.2      
-## [28] knitr_1.31           parallel_4.0.5       fansi_0.4.2         
-## [31] highr_0.8            Rcpp_1.0.6           readr_1.4.0         
-## [34] scales_1.1.1         vroom_1.4.0          jsonlite_1.7.2      
-## [37] bit_4.0.4            farver_2.1.0         parallelly_1.25.0   
-## [40] microbenchmark_1.4-7 hms_1.0.0            ggplot2_3.3.3       
-## [43] digest_0.6.27        stringi_1.5.3        dplyr_1.0.5         
-## [46] grid_4.0.5           cli_2.4.0            tools_4.0.5         
-## [49] magrittr_2.0.1       sass_0.3.1           tibble_3.1.0        
-## [52] crayon_1.4.1         tidyr_1.1.3          future.apply_1.8.1  
-## [55] pkgconfig_2.0.3      ellipsis_0.3.1       data.table_1.14.0   
-## [58] assertthat_0.2.1     rmarkdown_2.7        reshape_0.8.8       
-## [61] rstudioapi_0.13      R6_2.5.0             globals_0.14.0      
-## [64] compiler_4.0.5
+##  [7] colorspace_2.0-2     vctrs_0.3.8          generics_0.1.1      
+## [10] htmltools_0.5.2      yaml_2.2.1           utf8_1.2.2          
+## [13] rlang_0.4.12         jquerylib_0.1.4      pillar_1.6.4        
+## [16] glue_1.5.0           DBI_1.1.1            bit64_4.0.5         
+## [19] lifecycle_1.0.1      plyr_1.8.6           stringr_1.4.0       
+## [22] munsell_0.5.0        gtable_0.3.0         future_1.23.0       
+## [25] codetools_0.2-18     evaluate_0.14        knitr_1.36          
+## [28] tzdb_0.2.0           fastmap_1.1.0        parallel_4.1.2      
+## [31] fansi_0.5.0          highr_0.9            Rcpp_1.0.7          
+## [34] readr_2.1.0          scales_1.1.1         vroom_1.5.6         
+## [37] jsonlite_1.7.2       bit_4.0.4            farver_2.1.0        
+## [40] parallelly_1.28.1    microbenchmark_1.4.9 ggplot2_3.3.5       
+## [43] hms_1.1.1            digest_0.6.28        stringi_1.7.5       
+## [46] dplyr_1.0.7          grid_4.1.2           cli_3.1.0           
+## [49] tools_4.1.2          magrittr_2.0.1       sass_0.4.0          
+## [52] tibble_3.1.6         crayon_1.4.2         tidyr_1.1.4         
+## [55] future.apply_1.8.1   pkgconfig_2.0.3      ellipsis_0.3.2      
+## [58] data.table_1.14.2    rstudioapi_0.13      assertthat_0.2.1    
+## [61] rmarkdown_2.11       reshape_0.8.8        R6_2.5.1            
+## [64] globals_0.14.0       compiler_4.1.2
 ```

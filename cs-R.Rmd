@@ -1,0 +1,542 @@
+---
+title: "cs-R"
+author: "Dereck de Mezquita"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+knit: (function(inputFile, encoding) { 
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_file=file.path(dirname(inputFile), "./figures/", "/cs-bash.html")) })
+output:
+  html_document:
+    fig_caption: yes
+    keep_md: yes
+    number_sections: yes
+    toc: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# cs-R
+
+Advanced features of R, things I've learned, notes, templates, and benchmarks. In this course I include things I learned during package development.
+
+1. Better string interpolation: `stringr::str_interp`.
+1. Better loops: conclusion `lapply` is better, if you have big data use `future.apply::future_lapply()`
+    1. Consider the shape of your data, if you have a lot of columns calculations will take a long time, parallelisation might be useful.
+    1. If you must use a `for` loop, initialise its vector output: `results <- vector(mode = "list", length = how_many_elements_do_you_expect)`
+    1. Use this function for printing in parallel code: `messageParallel <- function(...) {system(sprintf('echo "%s"', paste0(..., collapse = "")))}`
+1. Use `data.table`:
+    1. `data.table` is an extension of `data.frame` they are compatible.
+    1. Reshape your data (longer/wider) with `data.table`'s `melt()` and `dcast()` - a lot faster.
+    1. Read/write `csv` files with `data.table::fread()`/`data.table::fwrite()`.
+1. Matrices take up less space.
+1. S4 class slot type check happens before class initialisation.
+
+Here is some code and syntax I found myself using and re-using.
+
+## Better string interpolation
+
+Typically in `R` people build strings this way using `paste`.
+
+```{r paste-strings}
+how_long <- "very long"
+paste('This is a', how_long, 'string...', sep = " ")
+```
+
+A more natural and `JavaScript` way of building strings is using `stringr`:
+
+```{r inter-strings}
+how_long <- "very long"
+stringr::str_interp('This is a ${how_long} string...')
+```
+
+This allows for more natural syntax in the following way:
+
+```{r stringr-loop}
+for (i in seq_along(iris[,-ncol(iris)])) {
+    print(stringr::str_interp('The mean for the column ${colnames(iris)[i]} is: ${round(mean(iris[,i]), 5)}'))
+}
+```
+
+## Better loops; `for` vs `apply`
+
+If you come from other programming languages you might instinctively use a `for` loop in this way.
+
+```{r classic-for-loop}
+separate_species <- vector(mode = "list", length = length(unique(iris$Species)))
+
+for (i in seq_along(unique(iris$Species))) {
+    separate_species[[i]] <- iris[as.character(iris$Species) == as.character(unique(iris$Species)[i]), -ncol(iris)]
+    
+    max_val <- max(separate_species[[i]])
+    print(max_val)
+}
+```
+
+This has the side effect of polluting our global environment with variables.
+
+```{r for-var-pollution}
+max_val
+
+i
+```
+
+In we can use something much better, `apply` type loops in conjunction with `list`s. This allows us to manipulate our data inside anonymous functions, and use `lapply`. The apply family of functions have a couple of advantages:
+
+1. These are optimised in `R` and run on `C` code a lot faster than `for` loops.
+1. These are embarrassingly parallel problems; these can easily be swapped out for `future` versions and run in parallel - `future.apply` package.
+
+
+```{r lapply-loop}
+species_names <- as.character(unique(iris$Species))
+names(species_names) <- species_names
+
+apply_sep <- lapply(species_names, function(species_names) {
+    species <- iris[iris$Species == species_names, -ncol(iris)]
+    print(max(species))
+    return(species)
+})
+```
+
+### Benchmark: `for` vs `lapply`
+
+Let's benchmark these two methods. Applies also work over `data.frames`, use all applies for going over columns, and `apply` with a margin of `1` for going over rows.
+
+Let's start by simulating some data.
+
+```{r generate-data-save}
+generated_data <- (function(offset_min, offset_max, num_cols, num_samples) {
+   generated_data <- list(
+        subject_a = replicate(n = num_samples, expr = runif(n = num_cols, min = 10, max = 15), simplify = "data.frame"),
+        subject_b = replicate(n = num_samples, expr = runif(n = num_cols, min = 10 + offset_min, max = 15 + offset_max), simplify = "data.frame")
+    )
+    
+    generated_data <- mapply(function(data, group_name) { # this is a multivariate apply
+        data <- as.data.frame(t(data))
+        colnames(data) <- paste(rep("gene", ncol(data)), 1:ncol(data), sep = "_")
+        data$subject <- group_name
+        data$condition <- "control"
+        return(data[,c("subject", "condition", setdiff(colnames(data), c("subject", "condition")))])
+    }, generated_data, names(generated_data), SIMPLIFY = FALSE)
+    
+    bound_data <- do.call("rbind", unname(generated_data))
+    
+    bound_data$subject <- make.names(bound_data$subject, unique = TRUE)
+    
+    bound_data[((nrow(bound_data) / 2) + 1):nrow(bound_data),]$condition <- "test"
+    return(bound_data)
+})(100, 150, num_cols = 10000, num_samples = 40)
+
+# let's save this for later
+data.table::fwrite(generated_data, "./data/generated-data.csv")
+```
+
+We will generalise the above into a function:
+
+```{r generate-data-function}
+generateData <- function(offset_min, offset_max, num_cols, num_samples) {
+   generated_data <- list(
+        subject_a = replicate(n = num_samples, expr = runif(n = num_cols, min = 10, max = 15), simplify = "data.frame"),
+        subject_b = replicate(n = num_samples, expr = runif(n = num_cols, min = 10 + offset_min, max = 15 + offset_max), simplify = "data.frame")
+    )
+    
+    generated_data <- mapply(function(data, group_name) { # this is a multivariate apply
+        data <- as.data.frame(t(data))
+        colnames(data) <- paste(rep("gene", ncol(data)), 1:ncol(data), sep = "_")
+        data$subject <- group_name
+        data$condition <- "control"
+        return(data[,c("subject", "condition", setdiff(colnames(data), c("subject", "condition")))])
+    }, generated_data, names(generated_data), SIMPLIFY = FALSE)
+    
+    bound_data <- do.call("rbind", unname(generated_data))
+    
+    bound_data$subject <- make.names(bound_data$subject, unique = TRUE)
+    
+    bound_data[((nrow(bound_data) / 2) + 1):nrow(bound_data),]$condition <- "test"
+    return(bound_data)
+}
+```
+
+Let's do a simple t-test a relatively simple operation; here's a preview of our data:
+
+```{r generated-data-preview}
+head(generated_data[, 1:5])
+tail(generated_data[, 1:5])
+dim(generated_data)
+```
+
+Let's start benchmarking with a dataset of size: columns 10 k, rows 40.
+
+Now let's do our calculations over these data; we will use 4 different methods to loop the data.
+
+1. Uninitialised for loop; this is a loop which grows a result vector. What happens here is that memory is allocated for every n size vector created at each iteration - **not efficient**.
+1. Initialised for loop; here we predict how big our results vector will be and create it at that size from the begining.
+1. Apply `lapply` loop. No need to create a vector this is done for us from the input data.
+1. Future `future_lapply` the same as above but this code is run in parallel. As you might notice this might not be a lot faster than `lapply`; future parallel code will beat sequential code when the datasets become very large; the job is split up across each core of your processor.
+
+```{r microbench-for-vs-lapply-10k-40}
+for_vs_lapply <- microbenchmark::microbenchmark(
+    for_loop_uninitialised = ({
+        results <- vector()
+        for (i in 1:(ncol(generated_data) - 2)) {
+            results[i] <- t.test(
+                generated_data[, -c(1, 2)][generated_data$condition == "control", i],
+                generated_data[, -c(1, 2)][generated_data$condition == "test", i],
+                var.equal = TRUE
+            )$p.value
+        }
+    }),
+    for_loop_initialised = ({
+        results <- vector(mode = "list", length = (ncol(generated_data) - 2))
+        for (i in 1:(ncol(generated_data) - 2)) {
+            results[i] <- t.test(
+                generated_data[, -c(1, 2)][generated_data$condition == "control", i],
+                generated_data[, -c(1, 2)][generated_data$condition == "test", i],
+                var.equal = TRUE
+            )$p.value
+        }
+    }),
+    lapply_loop = ({
+        lapply(generated_data[,-c(1, 2)], function(column) {
+            # print(data)
+            t.test(
+                column[generated_data$condition == "control"],
+                column[generated_data$condition == "test"],
+                var.equal = TRUE
+            )$p.value
+        })
+    }),
+    future_lapply = ({
+        future::plan(strategy = "multisession", workers = future::availableCores())
+        future.apply::future_lapply(generated_data[,-c(1, 2)], function(column) {
+            t.test(
+                column[generated_data$condition == "control"],
+                column[generated_data$condition == "test"],
+                var.equal = TRUE
+            )$p.value
+        })
+    }),
+    times = 3
+)
+```
+
+
+```{r microbench-plot-for-vs-lapply-10k-40, warning=FALSE, message=FALSE}
+ggplot2::autoplot(for_vs_lapply)
+```
+
+Consider the shape of your data, how many subjects how many observations? Now let's up the data size to 10k columns and 1.5k rows.
+
+```{r generate-data-10k-cols-1500k-rows}
+generated_data <- generateData(100, 150, num_cols = 7500, num_samples = 1500)
+```
+
+Again the same calculations as above a t-test.
+
+```{r microbench-for-vs-lapply-10k-1500}
+for_vs_lapply <- microbenchmark::microbenchmark(
+    for_loop_uninitialised = ({
+        results <- vector()
+        for (i in 1:(ncol(generated_data) - 2)) {
+            results[i] <- t.test(
+                generated_data[, -c(1, 2)][generated_data$condition == "control", i],
+                generated_data[, -c(1, 2)][generated_data$condition == "test", i],
+                var.equal = TRUE
+            )$p.value
+        }
+    }),
+    for_loop_initialised = ({
+        results <- vector(mode = "list", length = (ncol(generated_data) - 2))
+        for (i in 1:(ncol(generated_data) - 2)) {
+            results[i] <- t.test(
+                generated_data[, -c(1, 2)][generated_data$condition == "control", i],
+                generated_data[, -c(1, 2)][generated_data$condition == "test", i],
+                var.equal = TRUE
+            )$p.value
+        }
+    }),
+    lapply_loop = ({
+        lapply(generated_data[,-c(1, 2)], function(column) {
+            # print(data)
+            t.test(
+                column[generated_data$condition == "control"],
+                column[generated_data$condition == "test"],
+                var.equal = TRUE
+            )$p.value
+        })
+    }),
+    future_lapply = ({
+        future::plan(strategy = "multisession", workers = future::availableCores())
+        future.apply::future_lapply(generated_data[,-c(1, 2)], function(column) {
+            t.test(
+                column[generated_data$condition == "control"],
+                column[generated_data$condition == "test"],
+                var.equal = TRUE
+            )$p.value
+        })
+    }),
+    times = 3
+)
+```
+
+
+```{r microbench-plot-for-vs-lapply-10k-1500, warning=FALSE, message=FALSE}
+ggplot2::autoplot(for_vs_lapply)
+```
+
+### Messaging and printing in future applies
+
+Messaging back to the console is a challenge when using parallel code; use these functions to print to the console from parallel code:
+
+```{r message-parallel}
+messageParallel <- function(...) {
+    system(sprintf('echo "%s"', paste0(..., collapse = "")))
+}
+```
+
+```{r generate-data-parallel-print}
+generated_data <- generateData(100, 150, num_cols = 5, num_samples = 10)
+```
+
+Here we message back from a normal `apply` type function.
+
+```{r mapply-print}
+invisible(mapply(function(column, column_name) {
+    message(stringr::str_interp('We are on this column: ${column_name}'))
+    t.test(
+        column[generated_data$condition == "control"],
+        column[generated_data$condition == "test"],
+        var.equal = TRUE
+    )$p.value
+}, generated_data[,-c(1, 2)], names(generated_data[,-c(1, 2)]), SIMPLIFY = FALSE))
+```
+
+As you can see using the `message` function from paralle code doesn't work.
+
+```{r future-mapply-message}
+future::plan(strategy = "multisession", workers = future::availableCores())
+
+invisible(future.apply::future_mapply(function(column, column_name) {
+    message(stringr::str_interp('We are on this column: ${column_name}'))
+    t.test(
+        column[generated_data$condition == "control"],
+        column[generated_data$condition == "test"],
+        var.equal = TRUE
+    )$p.value
+}, generated_data[,-c(1, 2)], names(generated_data[,-c(1, 2)]), SIMPLIFY = FALSE))
+```
+
+Here we use the `messageParallel` function we defined above:
+
+```{r future-mapply-parapllel-message}
+future::plan(strategy = "multisession", workers = future::availableCores())
+
+invisible(future.apply::future_mapply(function(column, column_name) {
+    messageParallel(stringr::str_interp('We are on this column: ${column_name}'))
+    t.test(
+        column[generated_data$condition == "control"],
+        column[generated_data$condition == "test"],
+        var.equal = TRUE
+    )$p.value
+}, generated_data[,-c(1, 2)], names(generated_data[,-c(1, 2)]), SIMPLIFY = FALSE))
+```
+
+# Memory and resource efficient programming
+
+## Pivot and reshaping data
+
+We should heavily use `data.table`. It has been heavily optimised and written mostly in multi-threaded `C` and `C++`. For instructions on installing a multi-threaded version of `data.table` you can check out my guide here: [Makevars](https://gist.github.com/dereckdemezquita/ed860601138a46cf591a1bdcc95db0a2).
+
+Here I demonstrate melting data; pivot from wide to long dataset and benchmark the different methods.
+
+```{r define-pivot-data}
+df_data <- as.data.frame(tidyr::relig_income)
+tib_data <- tidyr::as_tibble(tidyr::relig_income)
+DT_data <- data.table::as.data.table(tidyr::relig_income) # converts data which is a data.frame to data.table *by reference*
+```
+
+We will be using the following methods for benchmark:
+
+1. `data.table::melt`
+1. `tidyr::pivot_longer`
+1. `reshape2::melt`
+1. `reshape::melt`
+
+```{r pivot-longer-data, eval=FALSE}
+data.table::melt(DT_data, id.vars = "religion")
+tidyr::pivot_longer(tib_data, -religion)
+reshape2::melt(df_data, id.vars = "religion")
+reshape::melt(df_data, id.vars = "religion")
+```
+
+We will also try these in combination with different data types. Some of these methods cast the data to other types or pass them to other methods; specifically `data.table` passes to `reshape2` if it receives a `data.frame` instead of a `data.table`.
+
+```{r microbench-pivot-longer-methods, warning=FALSE}
+bench_pivoting <- microbenchmark::microbenchmark(
+    dt_longer = data.table::melt(DT_data, id.vars = "religion"),
+    dt_convert_longer = data.table::melt(data.table::as.data.table(df_data), id.vars = "religion"),
+    dt_df_longer = data.table::melt(df_data, id.vars = "religion"),
+    tidyr_longer = tidyr::pivot_longer(tib_data, -religion),
+    reshape2 = reshape2::melt(df_data, id.vars = "religion"),
+    reshape = reshape::melt(df_data, id.vars = "religion"),
+    times = 100
+)
+```
+
+```{r microbench-plot-pivot-longer-methods, warning=FALSE, message=FALSE}
+ggplot2::autoplot(bench_pivoting) +
+    ggplot2::labs(title = "Comparing pivot long format data 1000 iterations", subtitle = "data.table is memory efficient - variables by reference not copies")
+```
+
+## Reading data and writing data
+
+We previously saved some data; let's try and read it back in. A lot of different options: `read.csv`, `read_csv`, `vroom`, `fread`.
+
+```{r microbench-read-data, warning=FALSE, message=FALSE}
+reading_csv <- microbenchmark::microbenchmark(
+    base_read_csv = ({data <- read.csv("./data/generated-data.csv")}),
+    datatable_fread = ({data <- data.table::fread("./data/generated-data.csv")}),
+    readr_read_csv = ({data <- readr::read_csv("./data/generated-data.csv")}),
+    vroom_read_csv = ({data <- vroom::vroom("./data/generated-data.csv")}),
+    times = 3
+)
+```
+
+```{r microbench-plot-read-data, warning=FALSE, message=FALSE}
+ggplot2::autoplot(reading_csv)
+```
+
+Now let's write some data. As before `data.table` comes out on top again.
+
+```{r microbench-write-data}
+read_in_data <- data.table::fread("./data/generated-data.csv")
+
+writing_csv <- microbenchmark::microbenchmark(
+    base_write_csv = ({write.csv(read_in_data, "./data/write-test-generated-data.csv")}),
+    datatable_fwrite = ({data.table::fwrite(read_in_data, "./data/write-test-generated-data.csv")}),
+    times = 3
+)
+```
+
+```{r microbench-plot-write-data, warning=FALSE, message=FALSE}
+ggplot2::autoplot(writing_csv)
+```
+
+## Data structures and manipulation
+
+### Object sizing
+
+Matrices are better than data.frames. Consider the shape of your data, do you have a large number of columns?
+
+Here in this example we have 200000 rows and 2 columns.
+
+```{r matrix-vs-df-size-thin-data}
+m <- matrix(1:400000, 200000, 2)
+d <- data.frame(m)
+
+object.size(m)
+object.size(d)
+
+dim(m)
+```
+
+In this next example we have 200000 columns, and 2 rows.
+
+```{r matrix-vs-df-size-wide-data}
+m <- matrix(1:400000, 2, 200000)
+d <- data.frame(m)
+object.size(m)
+object.size(d)
+
+dim(m)
+```
+
+In conclusion the more columns we have the larger the object is. This can be mitigated by using a `matrix` rather than `data.frame`.
+
+# S4 and object oriented programming (OOP)
+
+## Class validity check or initialisation first?
+
+I had a question whether class initialisation happens before or after validity check. Specifically I wanted to know if I can pass a `list` type object and convert to a `data.table` in the `initialize` method.
+
+Let's start with a data set; this is a `list` of `data.table`s.
+
+```{r list-of-dt}
+DT <- data.table::data.table(iris)
+
+DT[, row_name := 1:nrow(DT)]
+
+ls <- list(DT[, c("row_name", "Sepal.Length", "Sepal.Width")], DT[, c("row_name", "Petal.Length", "Petal.Width")])
+
+# merge(ls[[1]], ls[[2]], by = "row_name")
+```
+
+Let's create the class.
+
+```{r oop-initialise-or-validity-first, error=TRUE}
+InitListDT <- setClass(
+    Class = "InitListDT",
+    slots = list(
+        list_to_dt = "data.table"
+    ),
+    prototype = list(
+        list_to_dt = data.table::data.table()
+    )
+)
+
+setMethod("initialize", "InitListDT", function(.Object, ...) {
+    .Object <- callNextMethod(.Object, ...)
+
+    .Object@list_to_dt <- Reduce(function(...) {
+        merge(..., by = "row_name")
+    }, .Object@list_to_dt)
+
+    return(.Object)
+})
+
+InitListDT(list_to_dt = ls)
+```
+
+In my example shown above you can see this is not possible. The class slots are set and checked before they are passed over to the initialisation method. We can solve this by allow for a `list` **or** `data.table` type in this slot.
+
+```{r list-or-dt-initialise}
+setClassUnion(
+    "list_OR_data.table",
+    members = c("list", "data.table")
+)
+
+InitListDT <- setClass(
+    Class = "InitListDT",
+    slots = list(
+        list_to_dt = "list_OR_data.table"
+    ),
+    prototype = list(
+        list_to_dt = data.table::data.table()
+    )
+)
+
+setMethod("initialize", "InitListDT", function(.Object, ...) {
+    .Object <- callNextMethod(.Object, ...)
+
+    .Object@list_to_dt <- Reduce(function(...) {
+        merge(..., by = "row_name")
+    }, .Object@list_to_dt)
+
+    return(.Object)
+})
+
+object <- InitListDT(list_to_dt = ls)
+
+head(object@list_to_dt)
+```
+
+
+## Session info
+
+```{r session-info}
+sessionInfo()
+```
