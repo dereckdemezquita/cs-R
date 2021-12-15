@@ -1,7 +1,9 @@
+
 .DS_Store
 *.html
 
 deprecated/
+data/
 
 # Exclude knited .md files and other for now
 # /reports/*_files/
