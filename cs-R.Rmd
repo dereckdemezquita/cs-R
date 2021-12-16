@@ -516,7 +516,14 @@ InitListDT <- setClass(
     ),
     prototype = list(
         list_to_dt = data.table::data.table()
-    )
+    ),
+    validity = function(object) {
+        if(data.table::is.data.table(object@list_to_dt)) {
+            if(colnames(object@list_to_dt)[1] != "row_name") {
+                stop('First column name must be "row_name".')
+            }
+        }
+    }
 )
 
 setMethod("initialize", "InitListDT", function(.Object, ...) {
@@ -534,6 +541,36 @@ object <- InitListDT(list_to_dt = ls)
 head(object@list_to_dt)
 ```
 
+## Does class validation occur on all modifications?
+
+I'm wondering if every time a slot gets modified the validation function gets called. We previously created an object of type `InitlistDT`. The first row must be named "row_name" if it's a `data.table`. Let's try modifying this and see if we get an error. We will do it through a direct modification first and then by using a `setter` method.
+
+```{r direct-modify-validation}
+test <- object@list_to_dt
+colnames(test)[1] <- "yeet"
+
+object@list_to_dt <- test
+```
+
+No error was thrown, let's try using a `setter` method now.
+
+```{r setter-modify-validation}
+object <- InitListDT(list_to_dt = ls)
+
+setGeneric("accessSlot<-", function(obj, value) {
+    standardGeneric("accessSlot<-")
+})
+
+setMethod("accessSlot<-", "InitListDT", function(obj, value) {
+    obj@list_to_dt <- value
+    validObject(obj) # call validation function here
+    return(obj)
+})
+
+accessSlot(object) <- test
+```
+
+If we don't explicitly call the `validObject` function in out `setter` method then nothing is checked.
 
 ## Session info
 
