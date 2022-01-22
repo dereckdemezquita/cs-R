@@ -541,6 +541,49 @@ object <- InitListDT(list_to_dt = ls)
 head(object@list_to_dt)
 ```
 
+A more simple example as follows:
+
+```{r simple-s4-order-validation-init}
+Test <- setClass(
+    "Test",
+    slots = list(
+        yeet = "character"
+    ),
+    prototype = list(
+        yeet = character()
+    ),
+    validity = function(object) {
+        print('Hello from validity.')
+
+        if(object@yeet[1] != "a") {
+            stop('First element of slot yeet does not equal "a".')
+        }
+    }
+)
+
+setMethod("initialize", "Test", function(.Object, ...) {
+    .Object <- callNextMethod(.Object, ...)
+
+    print('Hello from initialisation.')
+
+    .Object@yeet[1] <- "a"
+
+    validObject(.Object)
+
+    return(.Object)
+})
+```
+
+```{r simple-s4-order-validation-init-print, error=TRUE}
+Test(yeet = c("b", "d", "e"))
+```
+
+As we can see the print first comes from the validity check. In the vase of a valid object we can re-check validity after initialisation using the function `validObject`. 
+
+```{r simple-s4-order-validation-init-recheck, error=TRUE}
+Test(yeet = c("a", "d", "e"))
+```
+
 ## Does class validation occur on all modifications?
 
 I'm wondering if every time a slot gets modified the validation function gets called. We previously created an object of type `InitlistDT`. The first row must be named "row_name" if it's a `data.table`. Let's try modifying this and see if we get an error. We will do it through a direct modification first and then by using a `setter` method.
@@ -554,7 +597,7 @@ object@list_to_dt <- test
 
 No error was thrown, let's try using a `setter` method now.
 
-```{r setter-modify-validation}
+```{r setter-modify-validation, error=TRUE}
 object <- InitListDT(list_to_dt = ls)
 
 setGeneric("accessSlot<-", function(obj, value) {

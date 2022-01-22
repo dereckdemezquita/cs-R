@@ -687,7 +687,14 @@ InitListDT <- setClass(
     ),
     prototype = list(
         list_to_dt = data.table::data.table()
-    )
+    ),
+    validity = function(object) {
+        if(data.table::is.data.table(object@list_to_dt)) {
+            if(colnames(object@list_to_dt)[1] != "row_name") {
+                stop('First column name must be "row_name".')
+            }
+        }
+    }
 )
 
 setMethod("initialize", "InitListDT", function(.Object, ...) {
@@ -715,6 +722,114 @@ head(object@list_to_dt)
 ## 6:        6          5.4         3.9          1.7         0.4
 ```
 
+A more simple example as follows:
+
+
+```r
+Test <- setClass(
+    "Test",
+    slots = list(
+        yeet = "character"
+    ),
+    prototype = list(
+        yeet = character()
+    ),
+    validity = function(object) {
+        print('Hello from validity.')
+
+        if(object@yeet[1] != "a") {
+            stop('First element of slot yeet does not equal "a".')
+        }
+    }
+)
+
+setMethod("initialize", "Test", function(.Object, ...) {
+    .Object <- callNextMethod(.Object, ...)
+
+    print('Hello from initialisation.')
+
+    .Object@yeet[1] <- "a"
+
+    validObject(.Object)
+
+    return(.Object)
+})
+```
+
+
+```r
+Test(yeet = c("b", "d", "e"))
+```
+
+```
+## [1] "Hello from validity."
+```
+
+```
+## Error in validityMethod(object): First element of slot yeet does not equal "a".
+```
+
+As we can see the print first comes from the validity check. In the vase of a valid object we can re-check validity after initialisation using the function `validObject`. 
+
+
+```r
+Test(yeet = c("a", "d", "e"))
+```
+
+```
+## [1] "Hello from validity."
+## [1] "Hello from initialisation."
+## [1] "Hello from validity."
+```
+
+```
+## An object of class "Test"
+## Slot "yeet":
+## [1] "a" "d" "e"
+```
+
+## Does class validation occur on all modifications?
+
+I'm wondering if every time a slot gets modified the validation function gets called. We previously created an object of type `InitlistDT`. The first row must be named "row_name" if it's a `data.table`. Let's try modifying this and see if we get an error. We will do it through a direct modification first and then by using a `setter` method.
+
+
+```r
+test <- object@list_to_dt
+colnames(test)[1] <- "yeet"
+
+object@list_to_dt <- test
+```
+
+No error was thrown, let's try using a `setter` method now.
+
+
+```r
+object <- InitListDT(list_to_dt = ls)
+
+setGeneric("accessSlot<-", function(obj, value) {
+    standardGeneric("accessSlot<-")
+})
+```
+
+```
+## [1] "accessSlot<-"
+```
+
+```r
+setMethod("accessSlot<-", "InitListDT", function(obj, value) {
+    obj@list_to_dt <- value
+    validObject(obj) # call validation function here
+    return(obj)
+})
+
+accessSlot(object) <- test
+```
+
+```
+## Error in validityMethod(object): First column name must be "row_name".
+```
+
+If we don't explicitly call the `validObject` function in out `setter` method then nothing is checked.
 
 ## Session info
 
@@ -739,21 +854,21 @@ sessionInfo()
 ## [1] stats     graphics  grDevices utils     datasets  methods   base     
 ## 
 ## loaded via a namespace (and not attached):
-##  [1] tidyselect_1.1.1     xfun_0.28            bslib_0.3.1         
+##  [1] tidyselect_1.1.1     xfun_0.29            bslib_0.3.1         
 ##  [4] purrr_0.3.4          reshape2_1.4.4       listenv_0.8.0       
 ##  [7] colorspace_2.0-2     vctrs_0.3.8          generics_0.1.1      
 ## [10] htmltools_0.5.2      yaml_2.2.1           utf8_1.2.2          
 ## [13] rlang_0.4.12         jquerylib_0.1.4      pillar_1.6.4        
-## [16] glue_1.5.0           DBI_1.1.1            bit64_4.0.5         
+## [16] glue_1.6.0           DBI_1.1.1            bit64_4.0.5         
 ## [19] lifecycle_1.0.1      plyr_1.8.6           stringr_1.4.0       
 ## [22] munsell_0.5.0        gtable_0.3.0         future_1.23.0       
-## [25] codetools_0.2-18     evaluate_0.14        knitr_1.36          
+## [25] codetools_0.2-18     evaluate_0.14        knitr_1.37          
 ## [28] tzdb_0.2.0           fastmap_1.1.0        parallel_4.1.2      
-## [31] fansi_0.5.0          highr_0.9            Rcpp_1.0.7          
-## [34] readr_2.1.0          scales_1.1.1         vroom_1.5.6         
+## [31] fansi_1.0.2          highr_0.9            Rcpp_1.0.8          
+## [34] readr_2.1.1          scales_1.1.1         vroom_1.5.7         
 ## [37] jsonlite_1.7.2       bit_4.0.4            farver_2.1.0        
-## [40] parallelly_1.28.1    microbenchmark_1.4.9 ggplot2_3.3.5       
-## [43] hms_1.1.1            digest_0.6.28        stringi_1.7.5       
+## [40] parallelly_1.30.0    microbenchmark_1.4.9 hms_1.1.1           
+## [43] ggplot2_3.3.5        digest_0.6.29        stringi_1.7.6       
 ## [46] dplyr_1.0.7          grid_4.1.2           cli_3.1.0           
 ## [49] tools_4.1.2          magrittr_2.0.1       sass_0.4.0          
 ## [52] tibble_3.1.6         crayon_1.4.2         tidyr_1.1.4         
